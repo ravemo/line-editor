@@ -67,21 +67,25 @@ ListFile loadListFile(const char* file_path){
         int n = strlen(linebuf);
         if(linebuf[0] == '>'){
             cursor = i;
+            updateCstring(&contents, linebuf+1);
+        }else{
+            updateCstring(&contents, linebuf);
         }
         i += n;
-        updateCstring(&contents, linebuf);
     }
     return (ListFile) {cursor, contents};
 }
 
 
 int main(int argc, char** argv){
-    signal(SIGINT, intHandler);
-
     /*tcgetattr gets the parameters of the current terminal
      *     STDIN_FILENO will tell tcgetattr that it should write the settings
      *         of stdin to oldt*/
     tcgetattr(STDIN_FILENO, &oldt);
+
+    // better call this early, but not before setting oldt
+    signal(SIGINT, intHandler);
+
     struct termios newt;
     tcgetattr(STDIN_FILENO, &newt);
 
