@@ -55,6 +55,24 @@ void insert(String* list, char item, unsigned int index){
     append(list, tmp);
 }
 
+void insertString(String* list, String other, unsigned int index){
+    if(list->len + other.len > list->capacity){
+        list->capacity += other.capacity;
+        list->items = realloc(list->items, list->capacity*sizeof(char));
+    }
+    if(index < list->len){
+        size_t to_move = list->len - index;
+        if(to_move > other.len)
+            to_move = other.len;
+        memmove(list->items + index + other.len,
+                list->items + index,
+                to_move);
+    }
+    memcpy(list->items + index, other.items, other.len);
+    list->len += other.len;
+}
+
+
 void update(String* list, String other){
     if(list->len + other.len > list->capacity){
         list->capacity += other.capacity;
@@ -89,6 +107,16 @@ char swapRemove(String* list, size_t index){
     char to_return = list->items[index];
     list->items[index] = list->items[list->len--];
     return to_return;
+}
+void removeSubstring(String* list, size_t start, size_t len){
+    if(start >= list->len - len){
+        list->len = start;
+        return;
+    }
+    for(uint i = start; i < list->len - len; ++i){
+        list->items[i] = list->items[i+len];
+    }
+    list->len -= len;
 }
 
 uint find(String haystack, char needle){

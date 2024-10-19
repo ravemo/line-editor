@@ -53,12 +53,18 @@ void intHandler(int _){
 }
 
 typedef struct {
-    int cursor;
+    size_t cursor;
     String contents;
 } ListFile;
 
 ListFile loadListFile(const char* file_path){
     file = fopen(file_path, "r+");
+    if(file == NULL){ // file doesn't exist, so we open with "w+" instead.
+        file = fopen(file_path, "w+");
+        assert(file != NULL);
+        fputc('\n', file);
+        rewind(file);
+    }
     String contents = String_init();
     int cursor = 0;
     char linebuf[1024];
@@ -73,7 +79,23 @@ ListFile loadListFile(const char* file_path){
         }
         i += n;
     }
+    append(&contents, '\0');
     return (ListFile) {cursor, contents};
+}
+
+void saveListFile(ListFile list){
+    if(list.cursor >= list.contents.len-1){
+        printf("\033[2K\rInvalid cursor position (%ld/%ld), cancelling save.\n",
+               list.cursor, list.contents.len-1);
+        return;
+    }
+    file = freopen(NULL, "w+", file);
+    const char old_c = list.contents.items[list.cursor];
+    list.contents.items[list.cursor] = '\0';
+    fputs(list.contents.items, file);
+    fputc('>', file);
+    list.contents.items[list.cursor] = old_c;
+    fputs(list.contents.items + list.cursor, file);
 }
 
 
@@ -118,9 +140,15 @@ int main(int argc, char** argv){
             getchar(); // skip '['
             switch(c = getchar()){
                 case 'A': // Up
+                    // Commit cached line
+                    removeSubstring(&list.contents, list.cursor, line.len);
+                    insertString(&list.contents, cached_line, list.cursor);
+
+                    // Change cursor
                     if(list.cursor > 0){
                         list.cursor = getLineStart(list.cursor-1, list.contents.items);
                     }
+
                     line = getLine(list.cursor, list.contents);
                     // TODO: Commit cached line
                     String_deinit(cached_line);
@@ -128,11 +156,16 @@ int main(int argc, char** argv){
                     col = cached_line.len-1;
                 break;
                 case 'B': // Down
-                    if(list.cursor + line.len == (int)list.contents.len) break;
+                    if(list.cursor + line.len == list.contents.len-1) break;
+                    // Commit cached line
+                    removeSubstring(&list.contents, list.cursor, line.len);
+                    insertString(&list.contents, cached_line, list.cursor);
+
+                    // Change cursor
                     list.cursor += line.len;
                     line = getLine(list.cursor, list.contents);
-                    // TODO: Commit cached line
                     
+                    // Cache new line
                     String_deinit(cached_line);
                     cached_line = stringFromView(line);
                     col = cached_line.len-1;
@@ -165,6 +198,10 @@ int main(int argc, char** argv){
         }
     }
 
+    removeSubstring(&list.contents, list.cursor, line.len);
+    insertString(&list.contents, cached_line, list.cursor);
+
+    saveListFile(list);
     String_deinit(cached_line);
     String_deinit(list.contents);
     fclose(file);
