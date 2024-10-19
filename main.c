@@ -6,14 +6,8 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <termios.h>
-
-#define BUF_SIZE 4096
-#define LINE_SIZE 256
-
-typedef struct {
-    int len;
-    char* ptr;
-} String;
+#include <fcntl.h>
+#include "dyn_string.h"
 
 int getLineStart(int pos, char* buf){
     if(pos == 0) return 0;
@@ -26,49 +20,49 @@ int getLineStart(int pos, char* buf){
     return 0;
 }
 
-String getLine(int pos, char* buf, int n){
-    const int start = getLineStart(pos, buf);
+StringView getLine(int pos, String str){
+    const int start = getLineStart(pos, str.items);
 
-    int i;
-    for(i = pos; i < n; ++i){
-        if(buf[i] == '\n'){
+    size_t i;
+    for(i = pos; i < str.len; ++i){
+        if(str.items[i] == '\n'){
             break;
         }
     }
-    return (String){i+1-start, buf+start};
+    return (StringView){i+1-start, str.items+start};
 }
 
 struct termios oldt;
-void shutdown(){
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-}
+FILE* file;
 
 void intHandler(int _){
     (void)_;
-    shutdown();
-    printf("\n");
-    exit(0);
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    int fd = open("/dev/null", O_RDONLY);
+    dup2(fd, 0);
+    close(fd);
 }
 
-void loadLine(String* dst_line, char* dst_buf, String src_line){
-    memset(dst_buf, 0, LINE_SIZE);
-    memcpy(dst_buf, src_line.ptr, src_line.len);
-    *dst_line = (String){src_line.len, dst_buf};
-}
+typedef struct {
+    int cursor;
+    String contents;
+} ListFile;
 
-void insert(String* str, char c, int pos){
-    for(int i = str->len; i >= pos; --i){
-        str->ptr[i+1] = str->ptr[i];
+ListFile loadListFile(const char* file_path){
+    file = fopen(file_path, "r+");
+    String contents = String_init();
+    int cursor = 0;
+    char linebuf[1024];
+    int i = 0;
+    while(fgets(linebuf, 1024, file)){
+        int n = strlen(linebuf);
+        if(linebuf[0] == '>'){
+            cursor = i;
+        }
+        i += n;
+        updateCstring(&contents, linebuf);
     }
-    str->ptr[pos] = c;
-    str->len += 1;
-}
-
-void orderedRemove(String* str, int pos){
-    for(int i = pos; i < str->len; ++i){
-        str->ptr[i] = str->ptr[i+1];
-    }
-    str->len -= 1;
+    return (ListFile) {cursor, contents};
 }
 
 
@@ -99,62 +93,51 @@ int main(int argc, char** argv){
         // TODO: Get file to load from argv, but also handle debug char
     //    strncpy(file_path, argv[1], 255);
     }
-    char buf[BUF_SIZE];
-    FILE* file = fopen(file_path, "r+");
-    //
-    // get cursor position
-    int cursor = 0;
-    {
-        int n = fread(buf, 1, BUF_SIZE, file);
 
-        int i = 0;
-        while(i < n){
-            const String line = getLine(i, buf, n);
-            if(buf[i] == '>'){
-                cursor = i;
-                break;
-            }
-            i += line.len+1;
-        }
-    }
+    ListFile list = loadListFile(file_path);
 
-
-    const int buflen = strlen(buf);
-    String line = getLine(cursor, buf, buflen);
-    int col = line.len-1;
-    char cached_line_buf[LINE_SIZE];
-    String cached_line;
-    loadLine(&cached_line, cached_line_buf, line);
+    StringView line = getLine(list.cursor, list.contents);
+    size_t col = line.len-1;
+    String cached_line = stringFromView(line);
     while(true){
-        char c = getchar();
         if(debug_char){
+            int ret = getchar();
+            if(ret == EOF) break;
+            char c = (char)ret;
             printf("Pressed key %d\n", (int)c);
             continue;
         }
 
-        printf("\033[2K\r%.*s", cached_line.len-1, cached_line.ptr);
-        printf("\033[%dG", col+1);
+        printf("\033[2K\r%.*s", (int)cached_line.len-1, cached_line.items);
+        printf("\033[%ldG", col+1);
+        int ret = getchar();
+        if(ret == EOF) break;
+        char c = (char) ret;
         if(c == '\033'){
             getchar(); // skip '['
             switch(getchar()){
                 case 'A': // Up
-                    if(cursor > 0){
-                        cursor = getLineStart(cursor-1, buf);
+                    if(list.cursor > 0){
+                        list.cursor = getLineStart(list.cursor-1, list.contents.items);
                     }
-                    line = getLine(cursor, buf, buflen);
+                    line = getLine(list.cursor, list.contents);
                     // TODO: Commit cached line
-                    loadLine(&cached_line, cached_line_buf, line);
+                    String_deinit(cached_line);
+                    cached_line = stringFromView(line);
                     col = cached_line.len-1;
                 break;
                 case 'B': // Down
-                    cursor += line.len;
-                    line = getLine(cursor, buf, buflen);
+                    if(list.cursor + line.len == (int)list.contents.len) break;
+                    list.cursor += line.len;
+                    line = getLine(list.cursor, list.contents);
                     // TODO: Commit cached line
-                    loadLine(&cached_line, cached_line_buf, line);
+                    
+                    String_deinit(cached_line);
+                    cached_line = stringFromView(line);
                     col = cached_line.len-1;
                 break;
                 case 'C': // Right
-                    if(col < line.len-1) col += 1;
+                    if(col < cached_line.len-1) col += 1;
                 break;
                 case 'D': // Left
                     if(col > 0) col -= 1;
@@ -167,13 +150,17 @@ int main(int argc, char** argv){
                     }
             }
         }
-        if(c >= 32 && c != 127 && cached_line.len < 255){
+        if(c >= 32 && c != 127){
             insert(&cached_line, c, col++);
         }else if(c == 127){
             orderedRemove(&cached_line, --col);
         }
     }
 
-    shutdown();
+    String_deinit(cached_line);
+    String_deinit(list.contents);
+    fclose(file);
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    printf("\n");
     return 0;
 }
