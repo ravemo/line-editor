@@ -95,12 +95,8 @@ int main(int argc, char** argv){
     tcsetattr( STDIN_FILENO, TCSANOW, &newt);
 
     char file_path[256] = "/tmp/single";
-    bool debug_char = false;
     if(argc >= 2){
-        (void)argv;
-        debug_char = true;
-        // TODO: Get file to load from argv, but also handle debug char
-    //    strncpy(file_path, argv[1], 255);
+        strncpy(file_path, argv[1], 255);
     }
 
     ListFile list = loadListFile(file_path);
@@ -109,14 +105,6 @@ int main(int argc, char** argv){
     size_t col = line.len-1;
     String cached_line = stringFromView(line);
     while(true){
-        if(debug_char){
-            int ret = getchar();
-            if(ret == EOF) break;
-            char c = (char)ret;
-            printf("Pressed key %d\n", (int)c);
-            continue;
-        }
-
         printf("\033[2K\r%.*s", (int)cached_line.len-1, cached_line.items);
         printf("\033[%ldG", col+1);
         int ret = getchar();
@@ -124,7 +112,7 @@ int main(int argc, char** argv){
         char c = (char) ret;
         if(c == '\033'){
             getchar(); // skip '['
-            switch(getchar()){
+            switch(c = getchar()){
                 case 'A': // Up
                     if(list.cursor > 0){
                         list.cursor = getLineStart(list.cursor-1, list.contents.items);
@@ -151,18 +139,25 @@ int main(int argc, char** argv){
                 case 'D': // Left
                     if(col > 0) col -= 1;
                 break;
-                case 51:
+                case 'S':
                     switch(getchar()){
-                        case 126:
+                        case '~':
                             orderedRemove(&cached_line, col);
-                            break;
+                        break;
+                        default:
+                            printf("\033[2K\rUnhandled escape character after \\033[S: char code %d\n", (int)c);
                     }
+                break;
+                default:
+                    printf("\033[2K\rUnhandled escape character after \\033[: char code %d\n", (int)c);
+
             }
-        }
-        if(c >= 32 && c != 127){
+        }else if(c >= 32 && c != 127){
             insert(&cached_line, c, col++);
         }else if(c == 127){
             orderedRemove(&cached_line, --col);
+        }else{
+            printf("\033[2K\rUnhandled character code %d\n", (int)c);
         }
     }
 
