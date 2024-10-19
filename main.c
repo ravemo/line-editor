@@ -141,6 +141,8 @@ int main(int argc, char** argv){
             switch(c = getchar()){
                 case 'A': // Up
                     // Commit cached line
+                    assert(list.contents.items[list.cursor+line.len-1] == '\n');
+                    assert(cached_line.items[cached_line.len-1] == '\n');
                     removeSubstring(&list.contents, list.cursor, line.len);
                     insertString(&list.contents, cached_line, list.cursor);
 
@@ -156,7 +158,7 @@ int main(int argc, char** argv){
                     col = cached_line.len-1;
                 break;
                 case 'B': // Down
-                    if(list.cursor + line.len == list.contents.len-1) break;
+                    if(list.cursor + line.len >= list.contents.len-2) break;
                     // Commit cached line
                     removeSubstring(&list.contents, list.cursor, line.len);
                     insertString(&list.contents, cached_line, list.cursor);
@@ -176,9 +178,10 @@ int main(int argc, char** argv){
                 case 'D': // Left
                     if(col > 0) col -= 1;
                 break;
-                case 'S':
-                    switch(getchar()){
+                case '3':
+                    switch(c = getchar()){
                         case '~':
+                            if(col >= cached_line.len-1) break;
                             orderedRemove(&cached_line, col);
                         break;
                         default:
@@ -191,8 +194,25 @@ int main(int argc, char** argv){
             }
         }else if(c >= 32 && c != 127){
             insert(&cached_line, c, col++);
-        }else if(c == 127){
-            orderedRemove(&cached_line, --col);
+        }else if(c == 127){ // backspace
+            if(col > 0)
+                orderedRemove(&cached_line, --col);
+        }else if(c == 10){ // Enter
+            // Commit cached line
+            removeSubstring(&list.contents, list.cursor, line.len);
+            insertString(&list.contents, cached_line, list.cursor);
+
+            // Change cursor and insert new line
+            list.cursor += cached_line.len;
+            insert(&list.contents, '\n', list.cursor);
+            line = getLine(list.cursor, list.contents);
+            assert(line.len == 1);
+            assert(line.ptr[0] == '\n');
+            
+            // Cache new line
+            String_deinit(cached_line);
+            cached_line = stringFromView(line);
+            col = cached_line.len-1;
         }else{
             printf("\033[2K\rUnhandled character code %d\n", (int)c);
         }

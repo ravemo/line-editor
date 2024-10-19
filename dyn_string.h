@@ -60,15 +60,12 @@ void insertString(String* list, String other, unsigned int index){
         list->capacity += other.capacity;
         list->items = realloc(list->items, list->capacity*sizeof(char));
     }
-    if(index < list->len){
-        size_t to_move = list->len - index;
-        if(to_move > other.len)
-            to_move = other.len;
-        memmove(list->items + index + other.len,
-                list->items + index,
-                to_move);
-    }
-    memcpy(list->items + index, other.items, other.len);
+    const size_t to_move = list->len - index;
+    memmove(list->items + index + other.len,
+            list->items + index,
+            to_move);
+
+    memmove(list->items + index, other.items, other.len);
     list->len += other.len;
 }
 
