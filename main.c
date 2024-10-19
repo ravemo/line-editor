@@ -34,13 +34,22 @@ StringView getLine(int pos, String str){
 
 struct termios oldt;
 FILE* file;
+volatile bool interrupted_once = false;
 
 void intHandler(int _){
     (void)_;
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    int fd = open("/dev/null", O_RDONLY);
-    dup2(fd, 0);
-    close(fd);
+    if(!interrupted_once){
+        // If interrupted once, try to close the stdin so we can exit gracefully
+        int fd = open("/dev/null", O_RDONLY);
+        dup2(fd, 0);
+        close(fd);
+        interrupted_once = true;
+    }else{
+        // if interrupted twice, we are most likely stuck somewhere that is not
+        // in the getchar call, so we just quit everything
+        exit(SIGINT);
+    }
 }
 
 typedef struct {
