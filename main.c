@@ -181,13 +181,17 @@ int main(int argc, char** argv){
                 break;
                 case 'B': // Down
                     if(list.cursor + line.len >= list.contents.len-2) break;
+                    const size_t prev_cursor = list.cursor;
                     // Commit cached line
                     removeSubstring(&list.contents, list.cursor, line.len);
                     insertString(&list.contents, cached_line, list.cursor);
 
+                    assert(list.cursor == 0 || list.contents.items[list.cursor-1] == '\n');
                     // Change cursor
-                    list.cursor += line.len;
+                    list.cursor += cached_line.len;
                     line = getLine(list.cursor, list.contents);
+                    assert(list.cursor > prev_cursor);
+                    assert(list.contents.items[list.cursor-1] == '\n');
                     
                     // Cache new line
                     String_deinit(cached_line);
@@ -220,13 +224,15 @@ int main(int argc, char** argv){
             if(col > 0){
                 orderedRemove(&cached_line, --col);
             }
-        }else if(c == 10){ // Enter
+        }else if(c == 10 || c == 14){ // Enter or Ctrl+N
             // Commit cached line
             removeSubstring(&list.contents, list.cursor, line.len);
             insertString(&list.contents, cached_line, list.cursor);
 
             // Change cursor
-            list.cursor += cached_line.len;
+            // if ctrl+N, we want are adding a new line above, so we don't change the cursor
+            if(c == 10)
+                list.cursor += cached_line.len;
             insert(&list.contents, '\n', list.cursor);
             line = getLine(list.cursor, list.contents);
             assert(line.len == 1);
@@ -237,11 +243,15 @@ int main(int argc, char** argv){
             cached_line = stringFromView(line);
             col = cached_line.len-1;
         }else if(c == 12){ // Remove line
+            if(cached_line.len > 1){
+                printf(" <- Do you really want to remove this? [y/N] ");
+                if((ret = getchar()) == EOF) break;
+                c = ret;
+                if(c == 'n' || c == 'N' || c == 10) continue;
+            }
+            removeSubstring(&list.contents, list.cursor, line.len);
             if(list.cursor > 0){
-                removeSubstring(&list.contents, list.cursor, line.len);
                 list.cursor = getLineStart(list.cursor-1, list.contents.items);
-            }else{
-                removeSubstring(&list.contents, list.cursor, line.len-1);
             }
             line = getLine(list.cursor, list.contents);
             String_deinit(cached_line);
@@ -259,9 +269,10 @@ int main(int argc, char** argv){
             if(prev_cursor < 0){
                 // Just move the line at the cursor to the top
                 transpose_count = 0;
+                const int len_zero = getLine(0, list.contents).len;
                 removeSubstring(&list.contents, list.cursor, line.len);
                 insertString(&list.contents, cached_line, 0);
-                list.cursor = list.cursor - line.len + cached_line.len;
+                list.cursor = list.cursor - len_zero + cached_line.len;
             }else{
                 const StringView prev_line = getLine(prev_cursor, list.contents);
                 // Insert the prev string after the current string
