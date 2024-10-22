@@ -74,10 +74,11 @@ ListFile loadListFile(const char* file_path){
         if(linebuf[0] == '>'){
             cursor = i;
             updateCstring(&contents, linebuf+1);
+            i += n-1;
         }else{
             updateCstring(&contents, linebuf);
+            i += n;
         }
-        i += n;
     }
     append(&contents, '\0');
     return (ListFile) {cursor, contents};
