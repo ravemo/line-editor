@@ -115,6 +115,14 @@ int getCursorNLinesBefore(int n, const char* str, int cursor){
     return cursor;
 }
 
+int cacheLine(ListFile list, String* cached_line, StringView* line, int* edit_count){
+    *line = getLine(list.cursor, list.contents);
+    String_deinit(*cached_line);
+    *cached_line = stringFromView(*line);
+    *edit_count += 1;
+    return cached_line->len-1;
+}
+
 
 int main(int argc, char** argv){
     /*tcgetattr gets the parameters of the current terminal
@@ -148,6 +156,7 @@ int main(int argc, char** argv){
     size_t col = line.len-1;
     String cached_line = stringFromView(line);
     int transpose_count = 0;
+    int edit_count = 0;
     while(true){
         printf("\033[2K\r%.*s", (int)cached_line.len-1, cached_line.items);
         printf("\033[%ldG", col+1);
@@ -174,15 +183,10 @@ int main(int argc, char** argv){
                         list.cursor = getLineStart(list.cursor-1, list.contents.items);
                     }
 
-                    line = getLine(list.cursor, list.contents);
-                    // TODO: Commit cached line
-                    String_deinit(cached_line);
-                    cached_line = stringFromView(line);
-                    col = cached_line.len-1;
+                    col = cacheLine(list, &cached_line, &line, &edit_count);
                 break;
                 case 'B': // Down
                     if(list.cursor + line.len >= list.contents.len-2) break;
-                    const size_t prev_cursor = list.cursor;
                     // Commit cached line
                     removeSubstring(&list.contents, list.cursor, line.len);
                     insertString(&list.contents, cached_line, list.cursor);
@@ -190,14 +194,8 @@ int main(int argc, char** argv){
                     assert(list.cursor == 0 || list.contents.items[list.cursor-1] == '\n');
                     // Change cursor
                     list.cursor += cached_line.len;
-                    line = getLine(list.cursor, list.contents);
-                    assert(list.cursor > prev_cursor);
-                    assert(list.contents.items[list.cursor-1] == '\n');
                     
-                    // Cache new line
-                    String_deinit(cached_line);
-                    cached_line = stringFromView(line);
-                    col = cached_line.len-1;
+                    col = cacheLine(list, &cached_line, &line, &edit_count);
                 break;
                 case 'C': // Right
                     if(col < cached_line.len-1) col += 1;
@@ -235,14 +233,7 @@ int main(int argc, char** argv){
             if(c == 10)
                 list.cursor += cached_line.len;
             insert(&list.contents, '\n', list.cursor);
-            line = getLine(list.cursor, list.contents);
-            assert(line.len == 1);
-            assert(line.ptr[0] == '\n');
-            
-            // Cache new line
-            String_deinit(cached_line);
-            cached_line = stringFromView(line);
-            col = cached_line.len-1;
+            col = cacheLine(list, &cached_line, &line, &edit_count);
         }else if(c == 12){ // Remove line
             if(cached_line.len > 1){
                 printf(" <- Do you really want to remove this? [y/N] ");
@@ -254,10 +245,7 @@ int main(int argc, char** argv){
             if(list.cursor > 0){
                 list.cursor = getLineStart(list.cursor-1, list.contents.items);
             }
-            line = getLine(list.cursor, list.contents);
-            String_deinit(cached_line);
-            cached_line = stringFromView(line);
-            col = cached_line.len-1;
+            col = cacheLine(list, &cached_line, &line, &edit_count);
         }else if(c == 20){ // Transpose line
             if(list.cursor == 0) continue; // Nothing to do here.
             // Transpose count behavior (applied at last line g):
@@ -298,14 +286,15 @@ int main(int argc, char** argv){
                 list.cursor = list.cursor - prev_line.len + cached_line.len; 
             }
             assert(list.cursor == 0 || list.contents.items[list.cursor-1] == '\n');
-            line = getLine(list.cursor, list.contents);
             
-            // Cache new line
-            String_deinit(cached_line);
-            cached_line = stringFromView(line);
-            col = cached_line.len-1;
+            col = cacheLine(list, &cached_line, &line, &edit_count);
         }else{
             printf("\033[2K\rUnhandled character code %d\n", (int)c);
+        }
+
+        if(edit_count == 3){
+            saveListFile(list);
+            edit_count = 0;
         }
     }
 
