@@ -258,10 +258,10 @@ int main(int argc, char** argv){
             if(prev_cursor < 0){
                 // Just move the line at the cursor to the top
                 transpose_count = 0;
-                const int len_zero = getLine(0, list.contents).len;
+                const int prev_len = getLine(getLineStart(list.cursor-1, list.contents.items), list.contents).len;
                 removeSubstring(&list.contents, list.cursor, line.len);
                 insertString(&list.contents, cached_line, 0);
-                list.cursor = list.cursor - len_zero + cached_line.len;
+                list.cursor = list.cursor - prev_len + cached_line.len;
             }else{
                 const StringView prev_line = getLine(prev_cursor, list.contents);
                 // Insert the prev string after the current string
