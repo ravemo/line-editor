@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <termios.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "dyn_string.h"
 
 int getLineStart(int pos, const char* buf){
@@ -33,7 +34,6 @@ StringView getLine(int pos, String str){
 }
 
 struct termios oldt;
-FILE* file;
 volatile bool interrupted_once = false;
 
 void intHandler(int _){
@@ -58,7 +58,7 @@ typedef struct {
 } ListFile;
 
 ListFile loadListFile(const char* file_path){
-    file = fopen(file_path, "r+");
+    FILE* file = fopen(file_path, "r+");
     if(file == NULL){ // file doesn't exist, so we open with "w+" instead.
         file = fopen(file_path, "w+");
         assert(file != NULL);
@@ -81,22 +81,25 @@ ListFile loadListFile(const char* file_path){
         }
     }
     append(&contents, '\0');
+    fclose(file);
     return (ListFile) {cursor, contents};
 }
 
-void saveListFile(ListFile list){
+void saveListFile(ListFile list, const char* file_path){
     if(list.cursor >= list.contents.len-1){
         printf("\033[2K\rInvalid cursor position (%ld/%ld), cancelling save.\n",
                list.cursor, list.contents.len-1);
         return;
     }
-    file = freopen(NULL, "w+", file);
+    FILE* file = fopen(file_path, "w+");
+    assert(file != NULL);
     const char old_c = list.contents.items[list.cursor];
     list.contents.items[list.cursor] = '\0';
     fputs(list.contents.items, file);
     fputc('>', file);
     list.contents.items[list.cursor] = old_c;
     fputs(list.contents.items + list.cursor, file);
+    fclose(file);
 }
 
 void printViewBytes(StringView view){
@@ -219,7 +222,7 @@ int main(int argc, char** argv){
             }
         }else if(c >= 32 && c != 127){
             insert(&cached_line, c, col++);
-        }else if(c == 127){ // backspace
+        }else if(c == 127 || c == 8){ // backspace
             if(col > 0){
                 orderedRemove(&cached_line, --col);
             }
@@ -292,8 +295,8 @@ int main(int argc, char** argv){
             printf("\033[2K\rUnhandled character code %d\n", (int)c);
         }
 
-        if(edit_count == 3){
-            saveListFile(list);
+        if(edit_count == 1){
+            saveListFile(list, file_path);
             edit_count = 0;
         }
     }
@@ -301,10 +304,9 @@ int main(int argc, char** argv){
     removeSubstring(&list.contents, list.cursor, line.len);
     insertString(&list.contents, cached_line, list.cursor);
 
-    saveListFile(list);
+    saveListFile(list, file_path);
     String_deinit(cached_line);
     String_deinit(list.contents);
-    fclose(file);
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     printf("\n");
     return 0;
