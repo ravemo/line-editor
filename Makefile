@@ -1,2 +1,2 @@
-main: main.c dyn_string.h
+main: main.c
 	gcc -Werror -Wall -Wextra -g main.c -o main

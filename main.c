@@ -8,20 +8,6 @@
 #include <termios.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "dyn_string.h"
-
-int getLineStart(int pos, const char* buf){
-	for(int i = pos-1; i >= 0; --i) if(buf[i] == '\n') return i+1;
-	return 0;
-}
-
-StringView getLine(int pos, String str){
-	const int start = getLineStart(pos, str.ptr);
-
-	size_t i;
-	for(i = pos; i < str.len; ++i) if(str.ptr[i] == '\n') break;
-	return (StringView){i+1-start, str.ptr+start};
-}
 
 struct termios oldt;
 volatile bool interrupted_once = false;
@@ -42,89 +28,103 @@ void intHandler(int _){
 	}
 }
 
+typedef int LineIdx;
+#define MAX_LINE_SIZE 512
 typedef struct {
-	size_t cursor;
-	String contents;
-} ListFile;
+	int len;
+	char* str;
+	LineIdx prev;
+	LineIdx next;
+} Line;
 
-ListFile loadListFile(const char* file_path){
+char* strbuf;
+Line* lines;
+size_t line_count = 1; // we reserve the first for null references
+
+LineIdx createNewLine() {
+	lines[line_count] = (Line) {
+		.str = strbuf + line_count*MAX_LINE_SIZE,
+		.len = 1,
+	};
+	lines[line_count].str[0] = '\n';
+	return line_count++;
+}
+void removeLine(LineIdx idx) {
+	LineIdx last_prev = lines[idx].prev;
+	LineIdx last_next = lines[idx].next;
+	if(last_prev) lines[last_prev].next = last_next;
+	if(last_next) lines[last_next].prev = last_prev;
+	lines[idx].prev = 0;
+	lines[idx].next = 0;
+}
+void insertBefore(LineIdx to_insert, LineIdx next) {
+	assert(lines[to_insert].prev == 0);
+	assert(lines[to_insert].next == 0);
+	lines[to_insert].next = next;
+	if(next) {
+		LineIdx tmp = lines[next].prev;
+		lines[next].prev = to_insert;
+		lines[to_insert].prev = tmp;
+		if(tmp) lines[tmp].next = to_insert;
+	}
+}
+void insertAfter(LineIdx to_insert, LineIdx prev) {
+	assert(lines[to_insert].prev == 0);
+	assert(lines[to_insert].next == 0);
+	lines[to_insert].prev = prev;
+	if(prev) {
+		LineIdx tmp = lines[prev].next;
+		lines[prev].next = to_insert;
+		lines[to_insert].next = tmp;
+		if(tmp) lines[tmp].prev = to_insert;
+	}
+}
+LineIdx loadListFile(const char* file_path){
 	FILE* file = fopen(file_path, "r+");
 	if(file == NULL){ // file doesn't exist, so we open with "w+" instead.
 		file = fopen(file_path, "w+");
 		assert(file != NULL);
-		fputc('\n', file);
-		rewind(file);
 	}
-	size_t file_len; {
-		int seekerr = fseek(file, 0, SEEK_END);
-		assert(seekerr == 0);
-		file_len = ftell(file);
-		assert(file_len != (size_t)-1);
-		seekerr = fseek(file, 0L, SEEK_SET); // rewind(file)
-		assert(seekerr == 0);
-	};
 	
-	char* contents = malloc(file_len+1);
-	int cursor = 0;
-	char linebuf[1024];
-	int i = 0;
-	while(fgets(linebuf, 1024, file)){
-		int n = strlen(linebuf);
-		if(linebuf[0] == '>'){
-			cursor = i;
-			memcpy(contents+i, linebuf+1, n-1);
-			i += n-1;
-		}else{
-			memcpy(contents+i, linebuf, n);
-			i += n;
+	LineIdx cursor = 0;
+	LineIdx cur_idx = createNewLine();
+	insertAfter(cur_idx, 0);
+	Line* line = &lines[cur_idx];
+	while(fgets(line->str, MAX_LINE_SIZE, file)){
+		line->len = strlen(line->str);
+		if(line->str[0] == '>') {
+			cursor = cur_idx;
+			for(int i = 0; i < line->len-1; ++i) line->str[i] = line->str[i+1];
+			--line->len;
 		}
+		LineIdx prev_idx = cur_idx;
+		cur_idx = createNewLine();
+		insertAfter(cur_idx, prev_idx);
+		line = &lines[cur_idx];
 	}
-	contents[i] = '\0';
 	fclose(file);
-	return (ListFile) {cursor, (String) {.ptr = contents, .len = i, .capacity = i}};
-}
-
-void saveListFile(ListFile list, const char* file_path){
-	if(list.cursor >= list.contents.len-1){
-		printf("\033[2K\rInvalid cursor position (%ld/%ld), cancelling save.\n",
-		       list.cursor, list.contents.len-1);
-		return;
-	}
-	FILE* file = fopen(file_path, "w+");
-	assert(file != NULL);
-	const char old_c = list.contents.ptr[list.cursor];
-	list.contents.ptr[list.cursor] = '\0';
-	fputs(list.contents.ptr, file);
-	fputc('>', file);
-	list.contents.ptr[list.cursor] = old_c;
-	fputs(list.contents.ptr + list.cursor, file);
-	fclose(file);
-}
-
-void printViewBytes(StringView view){
-	printf("\n\n( ");
-	for(int i = 0; i < view.len; ++i){
-		printf("%d ", (int)view.ptr[i]);
-	}
-	printf(")\n\n");
-}
-
-int getCursorNLinesBefore(int n, const char* str, int cursor){
-	for(int i = 0; i < n; ++i){
-		if(cursor == 0) return -1;
-		cursor = getLineStart(cursor-1, str);
-	}
+	if(cursor == 0) cursor = cur_idx;
 	return cursor;
 }
 
-int cacheLine(ListFile list, String* cached_line, StringView* line, int* edit_count){
-	*line = getLine(list.cursor, list.contents);
-	String_deinit(*cached_line);
-	*cached_line = stringFromView(*line);
-	*edit_count += 1;
-	return cached_line->len-1;
+void saveListFile(LineIdx cursor, const char* file_path){
+	assert(cursor != 0);
+	FILE* file = fopen(file_path, "w+");
+	assert(file != NULL);
+	LineIdx idx = cursor;
+	// get first index
+	while(lines[idx].prev) idx = lines[idx].prev;
+	// write all lines in order
+	assert(idx != 0);
+	while(idx) {
+		Line line = lines[idx];
+		line.str[line.len] = 0;
+		if(idx == cursor) fputc('>', file);
+		fputs(line.str, file);
+		idx = line.next;
+	}
+	fclose(file);
 }
-
 
 int main(int argc, char** argv){
 	/*tcgetattr gets the parameters of the current terminal
@@ -152,16 +152,22 @@ int main(int argc, char** argv){
 		strncpy(file_path, argv[1], 255);
 	}
 
-	ListFile list = loadListFile(file_path);
+	size_t lines_alloc_size = sizeof(Line)*((size_t)1 << 16);
+	strbuf = malloc((size_t)1 << 24);
+	assert(strbuf != NULL);
+	lines = malloc(lines_alloc_size);
+	assert(lines != NULL);
+	LineIdx cursor = loadListFile(file_path);
 
-	StringView line = getLine(list.cursor, list.contents);
-	size_t col = line.len-1;
-	String cached_line = stringFromView(line);
+	Line* line = &lines[cursor];
+	int col = line->len-1;
 	int transpose_count = 0;
-	int edit_count = 0;
+	bool changed = false;
 	while(true){
-		printf("\033[2K\r%.*s", (int)cached_line.len-1, cached_line.ptr);
-		printf("\033[%ldG", col+1);
+		line = &lines[cursor];
+		assert(line->str[line->len-1] == '\n');
+		printf("\033[2K\r%.*s", line->len-1, line->str);
+		printf("\033[%dG", col+1);
 		int ret = getchar();
 		if(ret == EOF) break;
 		char c = (char) ret;
@@ -174,42 +180,31 @@ int main(int argc, char** argv){
 			getchar(); // skip '['
 			switch(c = getchar()){
 				case 'A': // Up
-					// Commit cached line
-					assert(list.contents.ptr[list.cursor+line.len-1] == '\n');
-					assert(cached_line.ptr[cached_line.len-1] == '\n');
-					removeSubstring(&list.contents, list.cursor, line.len);
-					insertString(&list.contents, cached_line, list.cursor);
-
-					// Change cursor
-					if(list.cursor > 0){
-						list.cursor = getLineStart(list.cursor-1, list.contents.ptr);
-					}
-
-					col = cacheLine(list, &cached_line, &line, &edit_count);
+					if(!line->prev) break;
+					cursor = line->prev;
+					col = lines[cursor].len-1;
+					changed = true;
 				break;
 				case 'B': // Down
-					if(list.cursor + line.len >= list.contents.len-2) break;
-					// Commit cached line
-					removeSubstring(&list.contents, list.cursor, line.len);
-					insertString(&list.contents, cached_line, list.cursor);
-
-					assert(list.cursor == 0 || list.contents.ptr[list.cursor-1] == '\n');
-					// Change cursor
-					list.cursor += cached_line.len;
-					
-					col = cacheLine(list, &cached_line, &line, &edit_count);
+					if(!line->next) break;
+					cursor = line->next;
+					col = lines[cursor].len-1;
+					changed = true;
 				break;
 				case 'C': // Right
-					if(col < cached_line.len-1) col += 1;
+					if(col < line->len-1) col += 1;
 				break;
 				case 'D': // Left
 					if(col > 0) col -= 1;
 				break;
 				case '3':
 					switch(c = getchar()){
-						case '~':
-							if(col >= cached_line.len-1) break;
-							orderedRemove(&cached_line, col);
+						case '~': // If pressed "delete"
+							if(col >= line->len-1) break;
+							for(int i = col; i < line->len-1; ++i)
+								line->str[i] = line->str[i+1];
+							--line->len;
+							changed = true;
 						break;
 						default:
 							printf("\033[2K\rUnhandled escape character after \\033[S: char code %d\n", (int)c);
@@ -217,95 +212,75 @@ int main(int argc, char** argv){
 				break;
 				default:
 					printf("\033[2K\rUnhandled escape character after \\033[: char code %d\n", (int)c);
-
 			}
-		}else if(c >= 32 && c != 127){
-			insert(&cached_line, c, col++);
+		}else if(c >= 32 && c != 127){ // printable character
+			for(int i = line->len++; i > col; --i)
+				line->str[i] = line->str[i-1];
+			line->str[col++] = c;
+			changed = true;
 		}else if(c == 127 || c == 8){ // backspace
-			if(col > 0){
-				orderedRemove(&cached_line, --col);
+			if(col > 0) {
+				for(int i = --col; i < line->len-1; ++i)
+					line->str[i] = line->str[i+1];
+				--line->len;
+				changed = true;
 			}
-		}else if(c == 10 || c == 14){ // Enter or Ctrl+N
-			// Commit cached line
-			removeSubstring(&list.contents, list.cursor, line.len);
-			insertString(&list.contents, cached_line, list.cursor);
-
-			// Change cursor
-			// if ctrl+N, we want are adding a new line above, so we don't change the cursor
-			if(c == 10)
-				list.cursor += cached_line.len;
-			insert(&list.contents, '\n', list.cursor);
-			col = cacheLine(list, &cached_line, &line, &edit_count);
+		}else if(c == 10 || c == 14){ // Enter or Ctrl+N (resp.)
+			LineIdx new_cursor = createNewLine();
+			if(c == 14) insertBefore(new_cursor, cursor);
+			else insertAfter(new_cursor, cursor);
+			cursor = new_cursor;
+			col = 0;
+			changed = true;
 		}else if(c == 12){ // Remove line
-			if(cached_line.len > 1){
+			if(line->len > 1){
 				printf(" <- Do you really want to remove this? [y/N] ");
 				if((ret = getchar()) == EOF) break;
 				c = ret;
 				if(c == 'n' || c == 'N' || c == 10) continue;
 			}
-			removeSubstring(&list.contents, list.cursor, line.len);
-			if(list.cursor > 0){
-				list.cursor = getLineStart(list.cursor-1, list.contents.ptr);
+			if(!line->prev && !line->next) {
+				line->str[0] = '\n';
+				line->len = 1;
+			} else {
+				LineIdx new_cursor = line->prev ? line->prev : line->next;
+				removeLine(cursor);
+				cursor = new_cursor;
 			}
-			col = cacheLine(list, &cached_line, &line, &edit_count);
+			col = lines[cursor].len-1;
+			changed = true;
 		}else if(c == 20){ // Transpose line
-			if(list.cursor == 0) continue; // Nothing to do here.
+			if(!line->prev) continue; // Nothing to do here.
 			// Transpose count behavior (applied at last line g):
 			// 1: 1 2 3 4 -> 1 2 4 3
 			// 2: 1 2 4 3 -> 1 3 4 2
 			// 3: 1 3 4 2 -> 2 3 4 1
 			// 4: 1 2 4 3 -> 1 2 3 4
 			// 5: 1 2 3 4 -> 1 2 4 3
-			int prev_cursor = getCursorNLinesBefore(transpose_count, list.contents.ptr, list.cursor);
-			if(prev_cursor < 0){
-				// Just move the line at the cursor to the top
-				transpose_count = 0;
-				const int prev_len = getLine(getLineStart(list.cursor-1, list.contents.ptr), list.contents).len;
-				removeSubstring(&list.contents, list.cursor, line.len);
-				insertString(&list.contents, cached_line, 0);
-				list.cursor = list.cursor - prev_len + cached_line.len;
-			}else{
-				const StringView prev_line = getLine(prev_cursor, list.contents);
-				// Insert the prev string after the current string
-				insertString(&list.contents,
-					(String){
-						.len = prev_line.len,
-						.capacity = prev_line.len,
-						.ptr = prev_line.ptr
-					},
-					list.cursor + line.len);
-				// Remove the current string and last_string;
-				// so far this amounts to replacing the current with the prev_string
-				assert(prev_cursor == 0 || list.contents.ptr[prev_cursor-1] == '\n');
-				removeSubstring(&list.contents, list.cursor, line.len);
-				assert(prev_cursor == 0 || list.contents.ptr[prev_cursor-1] == '\n');
-				removeSubstring(&list.contents, prev_cursor, prev_line.len);
-				assert(prev_cursor == 0 || list.contents.ptr[prev_cursor-1] == '\n');
-				// Insert the new current string where prev_string previously was
-				insertString(&list.contents, cached_line, prev_cursor);
-
-				// Update Cursor to where it would be if it remained fixed
-				list.cursor = list.cursor - prev_line.len + cached_line.len;
-			}
-			assert(list.cursor == 0 || list.contents.ptr[list.cursor-1] == '\n');
-			
-			col = cacheLine(list, &cached_line, &line, &edit_count);
+			int cur_transpose = transpose_count;
+			LineIdx target = cursor;
+			while(lines[target].prev && cur_transpose > 0)
+				target = lines[target].prev;
+			if(cur_transpose > 0) transpose_count = 0; // reset the count if we hit the top
+			assert(target != cursor);
+			LineIdx last_prev = line->prev;
+			removeLine(cursor);
+			insertBefore(cursor, target);
+			cursor = last_prev;
+			col = lines[cursor].len-1;
+			changed = true;
 		}else{
 			printf("\033[2K\rUnhandled character code %d\n", (int)c);
 		}
 
-		if(edit_count == 1){
-			saveListFile(list, file_path);
-			edit_count = 0;
+		if(changed){
+			saveListFile(cursor, file_path);
+			changed = false;
 		}
 	}
 
-	removeSubstring(&list.contents, list.cursor, line.len);
-	insertString(&list.contents, cached_line, list.cursor);
-
-	saveListFile(list, file_path);
-	String_deinit(cached_line);
-	String_deinit(list.contents);
+	saveListFile(cursor, file_path);
+	free(lines);
 	tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 	printf("\n");
 	return 0;
