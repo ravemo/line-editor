@@ -141,7 +141,7 @@ int main(int argc, char** argv){
 
 	/*ICANON normally takes care that one line at a time will be processed
 	 *	 that means it will return if it sees a "\n" or an EOF or an EOL*/
-	newt.c_lflag &= ~(ICANON);		  
+	newt.c_lflag &= ~(ICANON);
 	newt.c_lflag &= ~(ECHO); // Don't print keys pressed
 
 	/*Those new settings will be set to STDIN
@@ -286,7 +286,7 @@ int main(int argc, char** argv){
 				insertString(&list.contents, cached_line, prev_cursor);
 
 				// Update Cursor to where it would be if it remained fixed
-				list.cursor = list.cursor - prev_line.len + cached_line.len; 
+				list.cursor = list.cursor - prev_line.len + cached_line.len;
 			}
 			assert(list.cursor == 0 || list.contents.items[list.cursor-1] == '\n');
 			
