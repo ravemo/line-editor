@@ -16,11 +16,11 @@ int getLineStart(int pos, const char* buf){
 }
 
 StringView getLine(int pos, String str){
-	const int start = getLineStart(pos, str.items);
+	const int start = getLineStart(pos, str.ptr);
 
 	size_t i;
-	for(i = pos; i < str.len; ++i) if(str.items[i] == '\n') break;
-	return (StringView){i+1-start, str.items+start};
+	for(i = pos; i < str.len; ++i) if(str.ptr[i] == '\n') break;
+	return (StringView){i+1-start, str.ptr+start};
 }
 
 struct termios oldt;
@@ -83,12 +83,12 @@ void saveListFile(ListFile list, const char* file_path){
 	}
 	FILE* file = fopen(file_path, "w+");
 	assert(file != NULL);
-	const char old_c = list.contents.items[list.cursor];
-	list.contents.items[list.cursor] = '\0';
-	fputs(list.contents.items, file);
+	const char old_c = list.contents.ptr[list.cursor];
+	list.contents.ptr[list.cursor] = '\0';
+	fputs(list.contents.ptr, file);
 	fputc('>', file);
-	list.contents.items[list.cursor] = old_c;
-	fputs(list.contents.items + list.cursor, file);
+	list.contents.ptr[list.cursor] = old_c;
+	fputs(list.contents.ptr + list.cursor, file);
 	fclose(file);
 }
 
@@ -151,7 +151,7 @@ int main(int argc, char** argv){
 	int transpose_count = 0;
 	int edit_count = 0;
 	while(true){
-		printf("\033[2K\r%.*s", (int)cached_line.len-1, cached_line.items);
+		printf("\033[2K\r%.*s", (int)cached_line.len-1, cached_line.ptr);
 		printf("\033[%ldG", col+1);
 		int ret = getchar();
 		if(ret == EOF) break;
@@ -166,14 +166,14 @@ int main(int argc, char** argv){
 			switch(c = getchar()){
 				case 'A': // Up
 					// Commit cached line
-					assert(list.contents.items[list.cursor+line.len-1] == '\n');
-					assert(cached_line.items[cached_line.len-1] == '\n');
+					assert(list.contents.ptr[list.cursor+line.len-1] == '\n');
+					assert(cached_line.ptr[cached_line.len-1] == '\n');
 					removeSubstring(&list.contents, list.cursor, line.len);
 					insertString(&list.contents, cached_line, list.cursor);
 
 					// Change cursor
 					if(list.cursor > 0){
-						list.cursor = getLineStart(list.cursor-1, list.contents.items);
+						list.cursor = getLineStart(list.cursor-1, list.contents.ptr);
 					}
 
 					col = cacheLine(list, &cached_line, &line, &edit_count);
@@ -184,7 +184,7 @@ int main(int argc, char** argv){
 					removeSubstring(&list.contents, list.cursor, line.len);
 					insertString(&list.contents, cached_line, list.cursor);
 
-					assert(list.cursor == 0 || list.contents.items[list.cursor-1] == '\n');
+					assert(list.cursor == 0 || list.contents.ptr[list.cursor-1] == '\n');
 					// Change cursor
 					list.cursor += cached_line.len;
 					
@@ -236,7 +236,7 @@ int main(int argc, char** argv){
 			}
 			removeSubstring(&list.contents, list.cursor, line.len);
 			if(list.cursor > 0){
-				list.cursor = getLineStart(list.cursor-1, list.contents.items);
+				list.cursor = getLineStart(list.cursor-1, list.contents.ptr);
 			}
 			col = cacheLine(list, &cached_line, &line, &edit_count);
 		}else if(c == 20){ // Transpose line
@@ -247,11 +247,11 @@ int main(int argc, char** argv){
 			// 3: 1 3 4 2 -> 2 3 4 1
 			// 4: 1 2 4 3 -> 1 2 3 4
 			// 5: 1 2 3 4 -> 1 2 4 3
-			int prev_cursor = getCursorNLinesBefore(transpose_count, list.contents.items, list.cursor);
+			int prev_cursor = getCursorNLinesBefore(transpose_count, list.contents.ptr, list.cursor);
 			if(prev_cursor < 0){
 				// Just move the line at the cursor to the top
 				transpose_count = 0;
-				const int prev_len = getLine(getLineStart(list.cursor-1, list.contents.items), list.contents).len;
+				const int prev_len = getLine(getLineStart(list.cursor-1, list.contents.ptr), list.contents).len;
 				removeSubstring(&list.contents, list.cursor, line.len);
 				insertString(&list.contents, cached_line, 0);
 				list.cursor = list.cursor - prev_len + cached_line.len;
@@ -262,23 +262,23 @@ int main(int argc, char** argv){
 					(String){
 						.len = prev_line.len,
 						.capacity = prev_line.len,
-						.items = prev_line.ptr
+						.ptr = prev_line.ptr
 					},
 					list.cursor + line.len);
 				// Remove the current string and last_string;
 				// so far this amounts to replacing the current with the prev_string
-				assert(prev_cursor == 0 || list.contents.items[prev_cursor-1] == '\n');
+				assert(prev_cursor == 0 || list.contents.ptr[prev_cursor-1] == '\n');
 				removeSubstring(&list.contents, list.cursor, line.len);
-				assert(prev_cursor == 0 || list.contents.items[prev_cursor-1] == '\n');
+				assert(prev_cursor == 0 || list.contents.ptr[prev_cursor-1] == '\n');
 				removeSubstring(&list.contents, prev_cursor, prev_line.len);
-				assert(prev_cursor == 0 || list.contents.items[prev_cursor-1] == '\n');
+				assert(prev_cursor == 0 || list.contents.ptr[prev_cursor-1] == '\n');
 				// Insert the new current string where prev_string previously was
 				insertString(&list.contents, cached_line, prev_cursor);
 
 				// Update Cursor to where it would be if it remained fixed
 				list.cursor = list.cursor - prev_line.len + cached_line.len;
 			}
-			assert(list.cursor == 0 || list.contents.items[list.cursor-1] == '\n');
+			assert(list.cursor == 0 || list.contents.ptr[list.cursor-1] == '\n');
 			
 			col = cacheLine(list, &cached_line, &line, &edit_count);
 		}else{

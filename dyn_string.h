@@ -6,14 +6,14 @@ typedef unsigned int uint;
 typedef struct {
     size_t capacity;
     size_t len;
-    char* items;
+    char* ptr;
 } String;
 
 String String_init(){
     return (String) {
         .capacity = 0,
         .len = 0,
-        .items = NULL,
+        .ptr = NULL,
     };
 }
 
@@ -21,23 +21,23 @@ String String_initCapacity(int capacity){
     return (String) {
         .capacity = capacity,
         .len = 0,
-        .items = malloc(capacity),
+        .ptr = malloc(capacity),
     };
 }
 
 void String_deinit(String list){
-    free(list.items);
+    free(list.ptr);
 }
 
 void append(String* list, char item){
     if(list->capacity == 0){
         list->capacity = 1;
-        list->items = realloc(list->items, sizeof(char));
+        list->ptr = realloc(list->ptr, sizeof(char));
     }else if(list->len == list->capacity){
         list->capacity *= 2;
-        list->items = realloc(list->items, list->capacity*sizeof(char));
+        list->ptr = realloc(list->ptr, list->capacity*sizeof(char));
     }
-    list->items[list->len++] = item;
+    list->ptr[list->len++] = item;
 }
 
 void insert(String* list, char item, unsigned int index){
@@ -45,11 +45,11 @@ void insert(String* list, char item, unsigned int index){
         append(list, item);
         return;
     }
-    char tmp = list->items[index];
-    list->items[index] = item;
+    char tmp = list->ptr[index];
+    list->ptr[index] = item;
     for(unsigned int i = index+1; i < list->len; ++i){
-        char tmp2 = list->items[i];
-        list->items[i] = tmp;
+        char tmp2 = list->ptr[i];
+        list->ptr[i] = tmp;
         tmp = tmp2;
     }
     append(list, tmp);
@@ -58,14 +58,14 @@ void insert(String* list, char item, unsigned int index){
 void insertString(String* list, String other, unsigned int index){
     if(list->len + other.len > list->capacity){
         list->capacity += other.capacity;
-        list->items = realloc(list->items, list->capacity*sizeof(char));
+        list->ptr = realloc(list->ptr, list->capacity*sizeof(char));
     }
     const size_t to_move = list->len - index;
-    memmove(list->items + index + other.len,
-            list->items + index,
+    memmove(list->ptr + index + other.len,
+            list->ptr + index,
             to_move);
 
-    memmove(list->items + index, other.items, other.len);
+    memmove(list->ptr + index, other.ptr, other.len);
     list->len += other.len;
 }
 
@@ -73,9 +73,9 @@ void insertString(String* list, String other, unsigned int index){
 void update(String* list, String other){
     if(list->len + other.len > list->capacity){
         list->capacity += other.capacity;
-        list->items = realloc(list->items, list->capacity*sizeof(char));
+        list->ptr = realloc(list->ptr, list->capacity*sizeof(char));
     }
-    memcpy(&list->items[list->len], other.items, other.len);
+    memcpy(&list->ptr[list->len], other.ptr, other.len);
     list->len += other.len;
 }
 
@@ -83,26 +83,26 @@ void updateCstring(String* list, const char* other){
     const size_t other_len = strlen(other);
     if(list->len + other_len > list->capacity){
         list->capacity += other_len;
-        list->items = realloc(list->items, list->capacity*sizeof(char));
+        list->ptr = realloc(list->ptr, list->capacity*sizeof(char));
     }
-    memcpy(&list->items[list->len], other, other_len);
+    memcpy(&list->ptr[list->len], other, other_len);
     list->len += other_len;
 }
 
 char orderedRemove(String* list, size_t index){
     if(index == list->len-1){
-        return list->items[list->len--];
+        return list->ptr[list->len--];
     }
-    char to_return = list->items[index];
+    char to_return = list->ptr[index];
     for(uint i = index; i < list->len-1; ++i){
-        list->items[i] = list->items[i+1];
+        list->ptr[i] = list->ptr[i+1];
     }
     list->len -= 1;
     return to_return;
 }
 char swapRemove(String* list, size_t index){
-    char to_return = list->items[index];
-    list->items[index] = list->items[list->len--];
+    char to_return = list->ptr[index];
+    list->ptr[index] = list->ptr[list->len--];
     return to_return;
 }
 void removeSubstring(String* list, size_t start, size_t len){
@@ -111,7 +111,7 @@ void removeSubstring(String* list, size_t start, size_t len){
         return;
     }
     for(uint i = start; i < list->len - len; ++i){
-        list->items[i] = list->items[i+len];
+        list->ptr[i] = list->ptr[i+len];
     }
     list->len -= len;
 }
@@ -119,7 +119,7 @@ void removeSubstring(String* list, size_t start, size_t len){
 uint find(String haystack, char needle){
     uint i;
     for(i = 0; i < haystack.len; ++i){
-        if(needle == haystack.items[i]){
+        if(needle == haystack.ptr[i]){
             break;
         }
     }
@@ -129,8 +129,8 @@ uint find(String haystack, char needle){
 String stringFromCstring(char* cstr){
     String ret;
     ret.capacity = ret.len= strlen(cstr);
-    ret.items = malloc(ret.len);
-    memcpy(ret.items, cstr, ret.len);
+    ret.ptr = malloc(ret.len);
+    memcpy(ret.ptr, cstr, ret.len);
     return ret;
 }
 
@@ -147,7 +147,7 @@ typedef struct {
 
 String stringFromView(StringView view) {
     String str = String_initCapacity(view.len);
-    memcpy(str.items, view.ptr, view.len);
+    memcpy(str.ptr, view.ptr, view.len);
     str.len = view.len;
     return str;
 }
