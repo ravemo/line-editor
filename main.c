@@ -11,13 +11,7 @@
 #include "dyn_string.h"
 
 int getLineStart(int pos, const char* buf){
-	if(pos == 0) return 0;
-	for(int i = pos-1; i >= 0; --i){
-		if(buf[i] == '\n'){
-			return i+1;
-			break;
-		}
-	}
+	for(int i = pos-1; i >= 0; --i) if(buf[i] == '\n') return i+1;
 	return 0;
 }
 
@@ -25,11 +19,7 @@ StringView getLine(int pos, String str){
 	const int start = getLineStart(pos, str.items);
 
 	size_t i;
-	for(i = pos; i < str.len; ++i){
-		if(str.items[i] == '\n'){
-			break;
-		}
-	}
+	for(i = pos; i < str.len; ++i) if(str.items[i] == '\n') break;
 	return (StringView){i+1-start, str.items+start};
 }
 
