@@ -79,16 +79,6 @@ void update(String* list, String other){
     list->len += other.len;
 }
 
-void updateCstring(String* list, const char* other){
-    const size_t other_len = strlen(other);
-    if(list->len + other_len > list->capacity){
-        list->capacity += other_len;
-        list->ptr = realloc(list->ptr, list->capacity*sizeof(char));
-    }
-    memcpy(&list->ptr[list->len], other, other_len);
-    list->len += other_len;
-}
-
 char orderedRemove(String* list, size_t index){
     if(index == list->len-1){
         return list->ptr[list->len--];

@@ -55,7 +55,16 @@ ListFile loadListFile(const char* file_path){
 		fputc('\n', file);
 		rewind(file);
 	}
-	String contents = String_init();
+	size_t file_len; {
+		int seekerr = fseek(file, 0, SEEK_END);
+		assert(seekerr == 0);
+		file_len = ftell(file);
+		assert(file_len != (size_t)-1);
+		seekerr = fseek(file, 0L, SEEK_SET); // rewind(file)
+		assert(seekerr == 0);
+	};
+	
+	char* contents = malloc(file_len+1);
 	int cursor = 0;
 	char linebuf[1024];
 	int i = 0;
@@ -63,16 +72,16 @@ ListFile loadListFile(const char* file_path){
 		int n = strlen(linebuf);
 		if(linebuf[0] == '>'){
 			cursor = i;
-			updateCstring(&contents, linebuf+1);
+			memcpy(contents+i, linebuf+1, n-1);
 			i += n-1;
 		}else{
-			updateCstring(&contents, linebuf);
+			memcpy(contents+i, linebuf, n);
 			i += n;
 		}
 	}
-	append(&contents, '\0');
+	contents[i] = '\0';
 	fclose(file);
-	return (ListFile) {cursor, contents};
+	return (ListFile) {cursor, (String) {.ptr = contents, .len = i, .capacity = i}};
 }
 
 void saveListFile(ListFile list, const char* file_path){
