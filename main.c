@@ -126,6 +126,17 @@ void saveListFile(LineIdx cursor, const char* file_path){
 	fclose(file);
 }
 
+void printWholeFile(LineIdx cursor) {
+	LineIdx idx = cursor;
+	// get first index
+	while(lines[idx].prev) idx = lines[idx].prev;
+	while(idx) {
+		if(idx == cursor) printf(">");
+		printf("%.*s", (int)lines[idx].len, lines[idx].str);
+		idx = lines[idx].next;
+	}
+}
+
 int main(int argc, char** argv){
 	/*tcgetattr gets the parameters of the current terminal
 	 *	 STDIN_FILENO will tell tcgetattr that it should write the settings
@@ -259,14 +270,24 @@ int main(int argc, char** argv){
 			// 5: 1 2 3 4 -> 1 2 4 3
 			int cur_transpose = transpose_count;
 			LineIdx target = cursor;
-			while(lines[target].prev && cur_transpose > 0)
+			while(lines[target].prev && cur_transpose --> 0)
 				target = lines[target].prev;
-			if(cur_transpose > 0) transpose_count = 0; // reset the count if we hit the top
 			assert(target != cursor);
 			LineIdx last_prev = line->prev;
 			removeLine(cursor);
-			insertBefore(cursor, target);
-			cursor = last_prev;
+			if(transpose_count == 1 || cur_transpose > 0) {
+				insertBefore(cursor, target);
+				if(cur_transpose > 0) {
+					target = last_prev;
+					transpose_count = 0;
+				}
+			} else {
+				LineIdx last_target_next = lines[target].next;
+				removeLine(target);
+				insertBefore(cursor, last_target_next);
+				insertAfter(target, last_prev);
+			}
+			cursor = target;
 			col = lines[cursor].len-1;
 			changed = true;
 		}else{
